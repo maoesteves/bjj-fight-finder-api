@@ -27,8 +27,13 @@ function corresponde(buscado, linha) {
 }
 
 function extrairHora(texto) {
+  // Tenta primeiro o padrão com FIGHT/LUTA
   const h = texto.match(/(\d{1,2}:\d{2})\s*:\s*(?:FIGHT|LUTA)/i);
-  return h ? h[1] : '';
+  if (h) return h[1];
+  // Tenta qualquer padrão HH:MM
+  const h2 = texto.match(/(\d{1,2}:\d{2})/);
+  if (h2) return h2[1];
+  return '';
 }
 
 app.post('/buscar-lutas', async (req, res) => {
@@ -46,11 +51,6 @@ app.post('/buscar-lutas', async (req, res) => {
     let texto = typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
     const linhas = texto.split('\n').map(l => l.trim()).filter(l => l.length > 3);
 
-    // Mostra todas as linhas relevantes no console
-    console.log('=== LINHAS DISPONIVEIS ===');
-    linhas.slice(0, 100).forEach((l, i) => console.log(`${i}: ${l}`));
-    console.log('=== FIM ===');
-
     let matAtual = '';
     const lutas = [];
 
@@ -65,9 +65,10 @@ app.post('/buscar-lutas', async (req, res) => {
       for (const nomeBuscado of names) {
         if (!corresponde(nomeBuscado, linha)) continue;
 
+        // Tenta extrair hora da propria linha, ou das 20 linhas anteriores (qualquer HH:MM)
         let hora = extrairHora(linha);
         if (!hora) {
-          for (let j = Math.max(0, i - 10); j < i; j++) {
+          for (let j = Math.max(0, i - 20); j < i; j++) {
             hora = extrairHora(linhas[j]);
             if (hora) break;
           }
@@ -76,12 +77,7 @@ app.post('/buscar-lutas', async (req, res) => {
         let nomeAtleta = linha.replace(/^\s*\d+\s+/, '').replace(/\s*FIGHT\s+\d+.+$/i, '').trim();
         if (nomeAtleta.length < 4) continue;
 
-        lutas.push({
-          athlete_name: nomeAtleta,
-          mat: matAtual || '-',
-          time: hora || '-',
-          raw_line: linha.substring(0, 300) // LINHA CRUA para debug
-        });
+        lutas.push({ athlete_name: nomeAtleta, mat: matAtual || '-', time: hora || '-' });
         break;
       }
     }
@@ -110,9 +106,9 @@ app.post('/buscar-lutas', async (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', servidor: 'BJJ Fight Finder - debug v1' });
+  res.json({ status: 'ok', servidor: 'BJJ Fight Finder - v15' });
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`BJJ Fight Finder debug v1 rodando na porta ${PORT}`);
+  console.log(`BJJ Fight Finder v15 rodando na porta ${PORT}`);
 });
