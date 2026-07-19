@@ -53,20 +53,16 @@ app.post('/buscar-lutas', async (req, res) => {
 
     for (let i = 0; i < linhas.length; i++) {
       const linha = linhas[i];
-
       const mm = linha.match(/[Mm][Aa][Tt]\s*(\d+)/);
       if (mm && linha.length < 30) matAtual = `Mat ${mm[1]}`;
-
       if (linha.match(/^(Winner|Defeated|Vencedor|Derrotado|Cookies|MANAGE|REJECT|ACCEPT|IBJJF|BJJCOMPSYSTEM|English|Portugues|By |Filter|Home|Live|Youtube|Day\s+\d|Transmissao|Utilizamos|Acesse|Central|Termos|Politica)/i)) continue;
       if (linha.match(/youtube|google|cdn|https?:\/\//i)) continue;
       if (linha.length < 6) continue;
 
       for (const nomeBuscado of names) {
         if (!corresponde(nomeBuscado, linha)) continue;
-
         let nomeAtleta = linha.replace(/^\s*\d+\s+/, '').replace(/\s*FIGHT\s+\d+.+$/i, '').trim();
         if (nomeAtleta.length < 4) continue;
-
         let hora = extrairHora(linha);
         if (!hora) {
           for (let j = Math.max(0, i - 10); j < i; j++) {
@@ -74,3 +70,38 @@ app.post('/buscar-lutas', async (req, res) => {
             if (hora) break;
           }
         }
+        lutas.push({ athlete_name: nomeAtleta, mat: matAtual || '-', time: hora || '-' });
+        break;
+      }
+    }
+
+    const vistos = new Set();
+    const lutasUnicas = [];
+    for (const l of lutas) {
+      const chave = `${l.athlete_name}|${l.mat}|${l.time}`;
+      if (!vistos.has(chave)) { vistos.add(chave); lutasUnicas.push(l); }
+    }
+
+    const encontrados = [...new Set(lutasUnicas.map(l => l.athlete_name))];
+    const naoEncontrados = names.filter(n => !encontrados.some(e => corresponde(e, n)));
+
+    res.json({
+      total_athletes: lutasUnicas.length,
+      total_fights: lutasUnicas.length,
+      not_found: naoEncontrados,
+      fights: lutasUnicas
+    });
+
+  } catch (error) {
+    console.error('Erro:', error.message);
+    res.status(500).json({ error: 'Erro de comunicacao com o servidor.', detail: error.message });
+  }
+});
+
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', servidor: 'BJJ Fight Finder - v13' });
+});
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`BJJ Fight Finder v13 rodando na porta ${PORT}`);
+});
