@@ -4,7 +4,7 @@ const axios = require('axios');
 const app = express();
 const PORT = process.env.PORT || 3000;
 app.use(cors());
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '10mb' }));
 
 function normalizar(nome) {
   return nome.toLowerCase()
@@ -16,7 +16,6 @@ function corresponde(buscado, linha) {
   var b = normalizar(buscado);
   var l = normalizar(linha);
   if (!b || !l) return false;
-  if (l === b) return true;
   if (l.indexOf(b) >= 0 || b.indexOf(l) >= 0) return true;
   var pb = b.split(' ').filter(function(w) { return w.length > 2; });
   var pl = l.split(' ').filter(function(w) { return w.length > 2; });
@@ -28,7 +27,7 @@ function corresponde(buscado, linha) {
     }
   }
   if (pb.length === 1) return pb[0] === pl[0];
-  return acertos >= 2 && acertos >= Math.ceil(Math.min(pb.length, pl.length) / 2);
+  return acertos >= 2;
 }
 
 app.post('/buscar-lutas', async function(req, res) {
@@ -44,7 +43,6 @@ app.post('/buscar-lutas', async function(req, res) {
     });
     var texto = typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
     var linhas = texto.split('\n').map(function(l) { return l.trim(); }).filter(function(l) { return l.length > 0; });
-
     var lutas = [];
     var matAtual = '';
     var aguardandoNome = false;
@@ -60,30 +58,20 @@ app.post('/buscar-lutas', async function(req, res) {
       }
 
       var up = linha.toUpperCase();
-      if (up.indexOf('WINNER OF') === 0) continue;
-      if (up.indexOf('DEFEATED OF') === 0) continue;
-      if (up.indexOf('COOKIES') >= 0) continue;
-      if (up.indexOf('ACCEPT') >= 0) continue;
-      if (up.indexOf('IBJJF') >= 0) continue;
-      if (up.indexOf('TITLE') === 0) continue;
-      if (up.indexOf('URL SOURCE') === 0) continue;
-      if (up.indexOf('MARKDOWN CONTENT') === 0) continue;
-      if (up.indexOf('YOUTUBE') >= 0) continue;
-      if (up.indexOf('TRANSMISSAO') >= 0) continue;
-      if (up.indexOf('UTILIZAMOS') >= 0) continue;
-      if (up.indexOf('ACESSE') >= 0) continue;
-      if (up.indexOf('POLITICA') >= 0) continue;
+      if (up.indexOf('WINNER OF') === 0 || up.indexOf('DEFEATED OF') === 0) continue;
+      if (up.indexOf('COOKIES') >= 0 || up.indexOf('ACCEPT') >= 0 || up.indexOf('IBJJF') >= 0) continue;
+      if (up.indexOf('TITLE') === 0 || up.indexOf('URL SOURCE') === 0 || up.indexOf('MARKDOWN CONTENT') === 0) continue;
+      if (up.indexOf('YOUTUBE') >= 0 || up.indexOf('TRANSMISSAO') >= 0) continue;
+      if (up.indexOf('UTILIZAMOS') >= 0 || up.indexOf('ACESSE') >= 0 || up.indexOf('POLITICA') >= 0) continue;
       if (/^http/i.test(linha)) continue;
 
-      var linhaNum = linha.replace(/^[*] */, '');
-      if (/^[0-9]+$/.test(linhaNum) && linhaNum.length <= 3) {
-        aguardandoNome = true;
-        continue;
-      }
+      var linhaClean = linha.replace(/^[*] */, '');
+      var sn = linhaClean.match(/^[0-9]{1,2}$/);
+      if (sn) { aguardandoNome = true; continue; }
 
       if (linha.length < 4) continue;
 
-      if (aguardandoNome && /^[A-Za-z]/.test(linha)) {
+      if (aguardandoNome && /^[A-Za-z\u00C0-\u024F]/.test(linha)) {
         aguardandoNome = false;
         for (var n = 0; n < names.length; n++) {
           if (corresponde(names[n], linha)) {
@@ -96,6 +84,24 @@ app.post('/buscar-lutas', async function(req, res) {
           }
         }
         continue;
+      }
+    }
+
+    // FALLBACK 2: Varredura completa - procura cada nome buscado em TODAS as linhas
+    for (var nb = 0; nb < names.length; nb++) {
+      var jaAchou = false;
+      for (var z = 0; z < lutas.length; z++) {
+        if (corresponde(names[nb], lutas[z].athlete_name)) { jaAchou = true; break; }
+      }
+      if (jaAchou) continue;
+
+      for (var i2 = 0; i2 < linhas.length; i2++) {
+        var l2 = linhas[i2];
+        if (l2.length < 4 || /^[0-9*]/.test(l2)) continue;
+        if (corresponde(names[nb], l2)) {
+          lutas.push({ athlete_name: l2.replace(/^[0-9]+ +/, '').trim(), mat: matAtual || '-' });
+          break;
+        }
       }
     }
 
@@ -124,7 +130,7 @@ app.post('/buscar-lutas', async function(req, res) {
   }
 });
 
-app.get('/debug', async function(req, res) {
+app.get('/debug-raw', async function(req, res) {
   var url = req.query.url || 'https://www.bjjcompsystem.com/tournaments/3262/tournament_days/4913';
   try {
     var response = await axios.get('https://r.jina.ai/' + url, {
@@ -132,24 +138,28 @@ app.get('/debug', async function(req, res) {
       timeout: 60000
     });
     var texto = typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
-    var linhas = texto.split('\n').map(function(l) { return l.trim(); }).filter(function(l) { return l.length > 0; });
-    var nomes = [];
+    var linhas = texto.split('\n').map(function(l) { return l.trim(); });
+    var secoes = {};
+    var matAtual = 'HEADER';
     for (var i = 0; i < linhas.length; i++) {
       var l = linhas[i];
-      if (/^[A-Za-z]/.test(l) && l.length >= 4 && !l.match(/^(Winner|Defeated|Cookies|MANAGE|REJECT|ACCEPT|IBJJF|ENGLISH|PORTUGUES|FILTER|HOME|LIVE|YOUTUBE|ADULT|JUVENILE|MASTER|MALE|FEMALE|TRANSMISSAO|UTILIZAMOS|ACESSE|CENTRAL|TERMOS|POLITICA|Title|URL|Markdown)/i)) {
-        nomes.push(l);
+      if (/^[Mm][Aa][Tt] /.test(l) || /^[*] +[Mm][Aa][Tt] /.test(l)) {
+        matAtual = l.replace(/^[*] */, '').trim();
+        if (!secoes[matAtual]) secoes[matAtual] = [];
       }
+      if (!secoes[matAtual]) secoes[matAtual] = [];
+      secoes[matAtual].push(i + ': ' + (l.length > 0 ? l : '(vazio)'));
     }
-    res.json({ total_lines: linhas.length, sample_20: linhas.slice(0, 20), possible_names: nomes });
+    res.json({ total_lines: linhas.length, linhas_por_secao: Object.keys(secoes).map(function(k) { return { secao: k, linhas: secoes[k] }; }) });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
 app.get('/health', function(req, res) {
-  res.json({ status: 'ok', servidor: 'BJJ Fight Finder - v28' });
+  res.json({ status: 'ok', servidor: 'BJJ Fight Finder - v29' });
 });
 
 app.listen(PORT, '0.0.0.0', function() {
-  console.log('BJJ Fight Finder v28 rodando na porta ' + PORT);
+  console.log('BJJ Fight Finder v29 rodando na porta ' + PORT);
 });
