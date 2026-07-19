@@ -16,7 +16,7 @@ function corresponde(buscado, linha) {
   var b = normalizar(buscado);
   var l = normalizar(linha);
   if (!b || !l) return false;
-  if (l.indexOf(b) >= 0 || b.indexOf(l) >= 0) return true;
+  if (l === b || l.indexOf(b) >= 0 || b.indexOf(l) >= 0) return true;
   var pb = b.split(' ').filter(function(w) { return w.length > 2; });
   var pl = l.split(' ').filter(function(w) { return w.length > 2; });
   if (pb.length === 0 || pl.length === 0) return false;
@@ -37,11 +37,30 @@ app.post('/buscar-lutas', async function(req, res) {
     return res.status(400).json({ error: 'URL e nomes obrigatorios' });
   }
   try {
-    var response = await axios.get('https://r.jina.ai/' + url, {
-      headers: { 'Accept': 'text/plain', 'Accept-Language': 'pt-BR,pt;q=0.9' },
-      timeout: 60000
-    });
-    var texto = typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
+    // TENTATIVA 1: Jina
+    var texto = '';
+    try {
+      var r1 = await axios.get('https://r.jina.ai/' + url, {
+        headers: { 'Accept': 'text/plain', 'Accept-Language': 'pt-BR,pt;q=0.9' },
+        timeout: 30000
+      });
+      texto = typeof r1.data === 'string' ? r1.data : JSON.stringify(r1.data);
+    } catch(e) {
+      console.log('Jina falhou, tentando HTML direto');
+    }
+
+    // TENTATIVA 2: Se Jina nao deu certo ou veio muito pequeno, pega HTML direto
+    if (!texto || texto.length < 500) {
+      var r2 = await axios.get(url, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
+        timeout: 30000
+      });
+      var html = typeof r2.data === 'string' ? r2.data : JSON.stringify(r2.data);
+      // Extrai texto do HTML - tira tags e normaliza
+      texto = html.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
+        .replace(/\s+/g, ' ').replace(/[ \t]+/g, '\n');
+    }
+
     var linhas = texto.split('\n').map(function(l) { return l.trim(); }).filter(function(l) { return l.length > 0; });
     var lutas = [];
     var matAtual = '';
@@ -60,15 +79,10 @@ app.post('/buscar-lutas', async function(req, res) {
       var up = linha.toUpperCase();
       if (up.indexOf('WINNER OF') === 0 || up.indexOf('DEFEATED OF') === 0) continue;
       if (up.indexOf('COOKIES') >= 0 || up.indexOf('ACCEPT') >= 0 || up.indexOf('IBJJF') >= 0) continue;
-      if (up.indexOf('TITLE') === 0 || up.indexOf('URL SOURCE') === 0 || up.indexOf('MARKDOWN CONTENT') === 0) continue;
-      if (up.indexOf('YOUTUBE') >= 0 || up.indexOf('TRANSMISSAO') >= 0) continue;
-      if (up.indexOf('UTILIZAMOS') >= 0 || up.indexOf('ACESSE') >= 0 || up.indexOf('POLITICA') >= 0) continue;
-      if (/^http/i.test(linha)) continue;
+      if (up.indexOf('YOUTUBE') >= 0 || /^http/i.test(linha)) continue;
 
       var linhaClean = linha.replace(/^[*] */, '');
-      var sn = linhaClean.match(/^[0-9]{1,2}$/);
-      if (sn) { aguardandoNome = true; continue; }
-
+      if (/^[0-9]{1,2}$/.test(linhaClean)) { aguardandoNome = true; continue; }
       if (linha.length < 4) continue;
 
       if (aguardandoNome && /^[A-Za-z\u00C0-\u024F]/.test(linha)) {
@@ -87,14 +101,13 @@ app.post('/buscar-lutas', async function(req, res) {
       }
     }
 
-    // FALLBACK 2: Varredura completa - procura cada nome buscado em TODAS as linhas
+    // FALLBACK: procura cada nome em TODAS as linhas
     for (var nb = 0; nb < names.length; nb++) {
       var jaAchou = false;
       for (var z = 0; z < lutas.length; z++) {
         if (corresponde(names[nb], lutas[z].athlete_name)) { jaAchou = true; break; }
       }
       if (jaAchou) continue;
-
       for (var i2 = 0; i2 < linhas.length; i2++) {
         var l2 = linhas[i2];
         if (l2.length < 4 || /^[0-9*]/.test(l2)) continue;
@@ -123,43 +136,41 @@ app.post('/buscar-lutas', async function(req, res) {
       }
       if (!achou) naoEncontrados.push(names[ne]);
     }
-    res.json({ total_athletes: lutasUnicas.length, total_fights: lutasUnicas.length, not_found: naoEncontrados, fights: lutasUnicas });
+
+    res.json({ total_athletes: lutasUnicas.length, total_fights: lutasUnicas.length, not_found: naoEncontrados, fights: lutasUnicas, debug: { linhas_total: linhas.length, linhas_amostra: linhas.slice(0, 30) } });
   } catch (error) {
     console.error('Erro:', error.message);
     res.status(500).json({ error: 'Erro de comunicacao com o servidor.', detail: error.message });
   }
 });
 
-app.get('/debug-raw', async function(req, res) {
+app.get('/debug', async function(req, res) {
   var url = req.query.url || 'https://www.bjjcompsystem.com/tournaments/3262/tournament_days/4913';
+  var results = {};
   try {
-    var response = await axios.get('https://r.jina.ai/' + url, {
+    var r1 = await axios.get('https://r.jina.ai/' + url, {
       headers: { 'Accept': 'text/plain', 'Accept-Language': 'pt-BR,pt;q=0.9' },
-      timeout: 60000
+      timeout: 30000
     });
-    var texto = typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
-    var linhas = texto.split('\n').map(function(l) { return l.trim(); });
-    var secoes = {};
-    var matAtual = 'HEADER';
-    for (var i = 0; i < linhas.length; i++) {
-      var l = linhas[i];
-      if (/^[Mm][Aa][Tt] /.test(l) || /^[*] +[Mm][Aa][Tt] /.test(l)) {
-        matAtual = l.replace(/^[*] */, '').trim();
-        if (!secoes[matAtual]) secoes[matAtual] = [];
-      }
-      if (!secoes[matAtual]) secoes[matAtual] = [];
-      secoes[matAtual].push(i + ': ' + (l.length > 0 ? l : '(vazio)'));
-    }
-    res.json({ total_lines: linhas.length, linhas_por_secao: Object.keys(secoes).map(function(k) { return { secao: k, linhas: secoes[k] }; }) });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+    results.jina = (typeof r1.data === 'string' ? r1.data : JSON.stringify(r1.data)).substring(0, 3000);
+  } catch(e) { results.jina = 'ERRO: ' + e.message; }
+  try {
+    var r2 = await axios.get(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      timeout: 30000
+    });
+    var html = typeof r2.data === 'string' ? r2.data : JSON.stringify(r2.data);
+    results.html_tamanho = html.length;
+    results.html_inicio = html.substring(0, 2000);
+    results.html_fim = html.substring(html.length - 500);
+  } catch(e) { results.html = 'ERRO: ' + e.message; }
+  res.json(results);
 });
 
 app.get('/health', function(req, res) {
-  res.json({ status: 'ok', servidor: 'BJJ Fight Finder - v29' });
+  res.json({ status: 'ok', servidor: 'BJJ Fight Finder - v30' });
 });
 
 app.listen(PORT, '0.0.0.0', function() {
-  console.log('BJJ Fight Finder v29 rodando na porta ' + PORT);
+  console.log('BJJ Fight Finder v30 rodando na porta ' + PORT);
 });
