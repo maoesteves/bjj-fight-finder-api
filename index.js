@@ -21,7 +21,9 @@ function corresponde(buscado, linha) {
   if (l.indexOf(b) >= 0) return true;
   var pb = b.split(' ').filter(function(w) { return w.length > 2; });
   if (pb.length === 0) return false;
-  for (var p = 0; p < pb.length; p++) { if (l.indexOf(pb[p]) >= 0) return true; }
+  for (var p = 0; p < pb.length; p++) {
+    if (l.indexOf(pb[p]) >= 0) return true;
+  }
   return false;
 }
 
@@ -50,10 +52,7 @@ app.post('/buscar-lutas', async function(req, res) {
     for (var i = 0; i < linhas.length; i++) {
       var linha = linhas[i];
 
-      // Captura tatame
-      var testMat1 = /^[Mm][Aa][Tt]s+\d+$/.test(linha);
-      var testMat2 = /^[*]s*[Mm][Aa][Tt]s+\d+/.test(linha);
-      if (testMat1 || testMat2) {
+      if (/^[Mm][Aa][Tt]s+\d+$/.test(linha) || /^[*]s*[Mm][Aa][Tt]s+\d+/.test(linha)) {
         var m = linha.match(/(d+)/);
         if (m) {
           matAtual = 'Mat ' + m[1];
@@ -63,7 +62,6 @@ app.post('/buscar-lutas', async function(req, res) {
         continue;
       }
 
-      // Captura FIGHT com horario
       var fm = linha.match(/(d{1,2}:d{2}s*(?:AM|PM)s*:s*FIGHTs+d+s*([^)]+))/i);
       if (fm) {
         fightAtual = fm[1];
@@ -71,25 +69,23 @@ app.post('/buscar-lutas', async function(req, res) {
         continue;
       }
 
-      // Pula linhas irrelevantes
-      if (/^(Adult|Juvenile|Master|Male|Female|Winner|Defeated)/i.test(linha)) continue;
-      if (/^(Cookies|MANAGE|REJECT|ACCEPT|IBJJF|English|Portugues|Filter|Home|Live|Youtube)/i.test(linha)) continue;
-      if (/^(Transmissao|Utilizamos|Acesse|Central|Termos|Politica)/i.test(linha)) continue;
+      var linhaUp = linha.toUpperCase();
+      if (/^(ADULT|JUVENILE|MASTER|MALE|FEMALE|WINNER|DEFEATED)/i.test(linha)) continue;
+      if (/^(COOKIES|MANAGE|REJECT|ACCEPT|IBJJF|ENGLISH|PORTUGUES|FILTER|HOME|LIVE|YOUTUBE)/i.test(linha)) continue;
+      if (/^(TRANSMISSAO|UTILIZAMOS|ACESSE|CENTRAL|TERMOS|POLITICA)/i.test(linha)) continue;
       if (/youtube|google|cdn|https?:\/\//i.test(linha)) continue;
-      if (linha.indexOf('Winner of') >= 0) continue;
-      if (linha.indexOf('Defeated of') >= 0) continue;
+      if (linhaUp.indexOf('WINNER OF') === 0) continue;
+      if (linhaUp.indexOf('DEFEATED OF') === 0) continue;
       if (linha.indexOf('
 ```') >= 0) continue;
       if (linha.indexOf('+ ') === 0) continue;
 
-      // Linha composta apenas por um numero
       var somenteNumero = linha.match(/^(d+)$/);
       if (somenteNumero) {
         aguardandoNome = true;
         continue;
       }
 
-      // Se estamos aguardando nome e a linha parece um nome
       if (aguardandoNome && linha.length >= 5 && /^[A-Za-z\u00C0-\u024F]/.test(linha)) {
         var nomeAtleta = linha;
 
@@ -108,7 +104,6 @@ app.post('/buscar-lutas', async function(req, res) {
       }
     }
 
-    // Remove duplicatas
     var vistos = {};
     var lutasUnicas = [];
     for (var l = 0; l < lutas.length; l++) {
@@ -151,9 +146,9 @@ app.post('/buscar-lutas', async function(req, res) {
 });
 
 app.get('/health', function(req, res) {
-  res.json({ status: 'ok', servidor: 'BJJ Fight Finder - v20' });
+  res.json({ status: 'ok', servidor: 'BJJ Fight Finder - v21' });
 });
 
 app.listen(PORT, '0.0.0.0', function() {
-  console.log('BJJ Fight Finder v20 rodando na porta ' + PORT);
+  console.log('BJJ Fight Finder v21 rodando na porta ' + PORT);
 });
