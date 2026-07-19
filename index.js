@@ -22,9 +22,7 @@ function corresponde(buscado, linha) {
   const pb = b.split(' ').filter(w => w.length > 2);
   if (pb.length === 0) return false;
   let acertos = 0;
-  for (const p of pb) {
-    if (l.includes(p)) acertos++;
-  }
+  for (const p of pb) { if (l.includes(p)) acertos++; }
   return acertos >= 1;
 }
 
@@ -61,8 +59,8 @@ app.post('/buscar-lutas', async (req, res) => {
 
       for (const nomeBuscado of names) {
         if (!corresponde(nomeBuscado, linha)) continue;
-        let nomeAtleta = linha.replace(/^\s*\d+\s+/, '').replace(/\s*FIGHT\s+\d+.+$/i, '').trim();
-        if (nomeAtleta.length < 4) continue;
+
+        // EXTRAI A HORA PRIMEIRO, ANTES DE MODIFICAR A LINHA
         let hora = extrairHora(linha);
         if (!hora) {
           for (let j = Math.max(0, i - 10); j < i; j++) {
@@ -70,6 +68,11 @@ app.post('/buscar-lutas', async (req, res) => {
             if (hora) break;
           }
         }
+
+        // DEPOIS extrai o nome do atleta
+        let nomeAtleta = linha.replace(/^\s*\d+\s+/, '').replace(/\s*FIGHT\s+\d+.+$/i, '').trim();
+        if (nomeAtleta.length < 4) continue;
+
         lutas.push({ athlete_name: nomeAtleta, mat: matAtual || '-', time: hora || '-' });
         break;
       }
@@ -99,9 +102,9 @@ app.post('/buscar-lutas', async (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', servidor: 'BJJ Fight Finder - v13' });
+  res.json({ status: 'ok', servidor: 'BJJ Fight Finder - v14' });
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`BJJ Fight Finder v13 rodando na porta ${PORT}`);
+  console.log(`BJJ Fight Finder v14 rodando na porta ${PORT}`);
 });
