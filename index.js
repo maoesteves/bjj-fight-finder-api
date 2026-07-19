@@ -27,10 +27,8 @@ function corresponde(buscado, linha) {
 }
 
 function extrairHora(texto) {
-  // Tenta primeiro o padrão com FIGHT/LUTA
   const h = texto.match(/(\d{1,2}:\d{2})\s*:\s*(?:FIGHT|LUTA)/i);
   if (h) return h[1];
-  // Tenta qualquer padrão HH:MM
   const h2 = texto.match(/(\d{1,2}:\d{2})/);
   if (h2) return h2[1];
   return '';
@@ -65,7 +63,6 @@ app.post('/buscar-lutas', async (req, res) => {
       for (const nomeBuscado of names) {
         if (!corresponde(nomeBuscado, linha)) continue;
 
-        // Tenta extrair hora da propria linha, ou das 20 linhas anteriores (qualquer HH:MM)
         let hora = extrairHora(linha);
         if (!hora) {
           for (let j = Math.max(0, i - 20); j < i; j++) {
