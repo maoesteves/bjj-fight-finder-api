@@ -76,8 +76,7 @@ app.post('/buscar-lutas', async function(req, res) {
       if (/youtube|google|cdn|https?:\/\//i.test(linha)) continue;
       if (linhaUp.indexOf('WINNER OF') === 0) continue;
       if (linhaUp.indexOf('DEFEATED OF') === 0) continue;
-      if (linha.indexOf('
-```') >= 0) continue;
+      if (linhaUp.indexOf('COOKIES') >= 0) continue;
       if (linha.indexOf('+ ') === 0) continue;
 
       var somenteNumero = linha.match(/^(d+)$/);
@@ -146,9 +145,9 @@ app.post('/buscar-lutas', async function(req, res) {
 });
 
 app.get('/health', function(req, res) {
-  res.json({ status: 'ok', servidor: 'BJJ Fight Finder - v21' });
+  res.json({ status: 'ok', servidor: 'BJJ Fight Finder - v22' });
 });
 
 app.listen(PORT, '0.0.0.0', function() {
-  console.log('BJJ Fight Finder v21 rodando na porta ' + PORT);
+  console.log('BJJ Fight Finder v22 rodando na porta ' + PORT);
 });
