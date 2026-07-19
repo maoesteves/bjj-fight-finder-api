@@ -48,20 +48,15 @@ app.post('/buscar-lutas', async (req, res) => {
     for (let i = 0; i < linhas.length; i++) {
       const linha = linhas[i];
 
-      // Captura Mat atual
       const mm = linha.match(/[Mm][Aa][Tt]\s*(\d+)/);
-      if (mm && linha.length < 30) matAtual = `Mat ${mm[1]}`;
+      if (mm && linha.length < 30) matAtual = 'Mat ' + mm[1];
 
-      // Captura a linha COMPLETA do FIGHT (ex: "12:53 PM: FIGHT 4 (SF)")
       const fm = linha.match(/(\d{1,2}:\d{2}\s*(?:AM|PM)\s*:\s*FIGHT\s+\d+\s*\([^)]+\))/i);
-      if (fm) {
-        fightAtual = fm[1];
-        continue;
-      }
+      if (fm) { fightAtual = fm[1]; continue; }
 
-      // Pula linhas irrelevantes
-      if (linha.match(/^(Winner|Defeated|Vencedor|Derrotado|Cookies|MANAGE|REJECT|ACCEPT|IBJJF|BJJCOMPSYSTEM|English|Portugues|By |Filter|Home|Live|Youtube|Day\s+\d|Transmissao|Utilizamos|Acesse|Central|Termos|Politica|\*|\+|
-```)/i)) continue;
+      const ignorar = /^(Winner|Defeated|Vencedor|Derrotado|Cookies|MANAGE|REJECT|ACCEPT|IBJJF|BJJCOMPSYSTEM|English|Portugues|By |Filter|Home|Live|Youtube|Day\s+\d|Transmissao|Utilizamos|Acesse|Central|Termos|Politica)/i;
+      if (linha.match(ignorar)) continue;
+      if (linha.match(/youtube|google|cdn|https?:\/\//i)) continue;
       if (linha.length < 6) continue;
 
       for (const nomeBuscado of names) {
@@ -82,6 +77,7 @@ app.post('/buscar-lutas', async (req, res) => {
     const vistos = new Set();
     const lutasUnicas = [];
     for (const l of lutas) {
+      const chave = l.athlete_name + '|' + l.mat + '|' + l.fight;
       if (!vistos.has(chave)) { vistos.add(chave); lutasUnicas.push(l); }
     }
 
@@ -106,5 +102,5 @@ app.get('/health', (req, res) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`BJJ Fight Finder v16 rodando na porta ${PORT}`);
+  console.log('BJJ Fight Finder v16 rodando na porta ' + PORT);
 });
