@@ -42,22 +42,17 @@ app.post('/buscar-lutas', async function(req, res) {
     var matAtual = '';
     var fightAtual = '';
     var aguardandoNome = false;
-
     for (var i = 0; i < linhas.length; i++) {
       var linha = linhas[i];
-
-      // CORRIGIDO: captura Mat mesmo se tiver * antes, tipo "* Mat 1"
-      if (/[Mm][Aa][Tt]\s+\d+/.test(linha) && linha.length < 30) {
-        var m = linha.match(/(\d+)/);
+      if (/[Mm][Aa][Tt]s+\d+/.test(linha) && linha.length < 30) {
+        var m = linha.match(/(d+)/);
         if (m) { matAtual = 'Mat ' + m[1]; }
         fightAtual = '';
         aguardandoNome = false;
         continue;
       }
-
-      var fm = linha.match(/(\d{1,2}:\d{2}\s*(?:AM|PM)\s*:\s*FIGHT\s+\d+\s*\([^)]+\))/i);
+      var fm = linha.match(/(d{1,2}:d{2}s*(?:AM|PM)s*:s*FIGHTs+d+s*([^)]+))/i);
       if (fm) { fightAtual = fm[1]; aguardandoNome = false; continue; }
-
       var up = linha.toUpperCase();
       if (up.indexOf('WINNER OF') === 0) continue;
       if (up.indexOf('DEFEATED OF') === 0) continue;
@@ -99,10 +94,8 @@ app.post('/buscar-lutas', async function(req, res) {
       if (up.indexOf('MARKDOWN CONTENT') === 0) continue;
       if (/^http/i.test(linha)) continue;
       if (linha.length < 4) continue;
-
-      var sn = linha.match(/^(\d+)$/);
+      var sn = linha.match(/^(d+)$/);
       if (sn) { aguardandoNome = true; continue; }
-
       if (aguardandoNome && /^[A-Za-z]/.test(linha) && linha.length >= 4) {
         for (var n = 0; n < names.length; n++) {
           if (corresponde(names[n], linha)) {
@@ -119,7 +112,6 @@ app.post('/buscar-lutas', async function(req, res) {
         aguardandoNome = false;
         continue;
       }
-
       for (var n2 = 0; n2 < names.length; n2++) {
         if (corresponde(names[n2], linha) && linha.length >= 4) {
           var jaTem2 = false;
@@ -127,13 +119,12 @@ app.post('/buscar-lutas', async function(req, res) {
             if (corresponde(names[n2], lutas[z2].athlete_name)) { jaTem2 = true; break; }
           }
           if (!jaTem2) {
-            lutas.push({ athlete_name: linha.replace(/^\d+\s+/, '').trim(), mat: matAtual || '-', fight: fightAtual || '-' });
+            lutas.push({ athlete_name: linha.replace(/^d+s+/, '').trim(), mat: matAtual || '-', fight: fightAtual || '-' });
           }
           break;
         }
       }
     }
-
     var vistos = {};
     var lutasUnicas = [];
     for (var l = 0; l < lutas.length; l++) {
@@ -142,16 +133,21 @@ app.post('/buscar-lutas', async function(req, res) {
       if (!vistos[chave]) { vistos[chave] = true; lutasUnicas.push(luta); }
     }
     var nomesEncontrados = [];
-    for (var le = 0; le < lutasUnicas.length; le++) { nomesEncontrados.push(lutasUnicas[le].athlete_name); }
+    for (var i = 0; i < lutasUnicas.length; i++) { nomesEncontrados.push(lutasUnicas[i].athlete_name); }
     var naoEncontrados = [];
-    for (var ne = 0; ne < names.length; ne++) {
+    for (var i = 0; i < names.length; i++) {
       var achou = false;
-      for (var en = 0; en < nomesEncontrados.length; en++) {
-        if (corresponde(names[ne], nomesEncontrados[en])) { achou = true; break; }
+      for (var j = 0; j < nomesEncontrados.length; j++) {
+        if (corresponde(names[i], nomesEncontrados[j])) { achou = true; break; }
       }
-      if (!achou) naoEncontrados.push(names[ne]);
+      if (!achou) naoEncontrados.push(names[i]);
     }
-    res.json({ total_athletes: lutasUnicas.length, total_fights: lutasUnicas.length, not_found: naoEncontrados, fights: lutasUnicas });
+    res.json({
+      total_athletes: lutasUnicas.length,
+      total_fights: lutasUnicas.length,
+      not_found: naoEncontrados,
+      fights: lutasUnicas
+    });
   } catch (error) {
     console.error('Erro:', error.message);
     res.status(500).json({ error: 'Erro de comunicacao com o servidor.', detail: error.message });
@@ -159,9 +155,9 @@ app.post('/buscar-lutas', async function(req, res) {
 });
 
 app.get('/health', function(req, res) {
-  res.json({ status: 'ok', servidor: 'BJJ Fight Finder - v25' });
+  res.json({ status: 'ok', servidor: 'BJJ Fight Finder - v26' });
 });
 
 app.listen(PORT, '0.0.0.0', function() {
-  console.log('BJJ Fight Finder v25 rodando na porta ' + PORT);
+  console.log('BJJ Fight Finder v26 rodando na porta ' + PORT);
 });
