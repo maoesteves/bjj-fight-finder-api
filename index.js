@@ -31,66 +31,82 @@ app.post('/buscar-lutas', async (req, res) => {
     return res.status(400).json({ error: 'URL e nomes obrigatorios' });
   }
   try {
-    const jinaUrl = 'https://r.jina.ai/' + encodeURIComponent(url);
-    const response = await axios.get(jinaUrl, {
+    // NAO codificar a URL - Jina funciona melhor com URL crua
+    let targetUrl = url;
+    if (!targetUrl.startsWith('https://r.jina.ai/')) {
+      targetUrl = 'https://r.jina.ai/' + targetUrl;
+    }
+    
+    const response = await axios.get(targetUrl, {
       headers: { 'Accept': 'text/plain', 'Accept-Language': 'pt-BR,pt;q=0.9' },
-      timeout: 45000
+      timeout: 60000
     });
 
     let texto = typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
-    const linhas = texto.split('\n').map(l => l.trim()).filter(l => l.length > 2);
+    const linhas = texto.split('\n').map(l => l.trim()).filter(l => l.length > 0);
 
-    // Estrutura para guardar as informacoes
     const lutas = [];
     let matAtual = '';
     let fightAtual = '';
+    let aguardandoNome = false;
+    let ultimoNumero = '';
 
     for (let i = 0; i < linhas.length; i++) {
       const linha = linhas[i];
 
-      // 1. Captura tatame atual
-      const mm = linha.match(/[Mm][Aa][Tt]\s+(\d+)/);
-      if (mm && linha.length < 30) {
-        matAtual = 'Mat ' + mm[1];
-        fightAtual = '';
+      // Captura tatame
+      if (/^[Mm][Aa][Tt]\s+\d+$/.test(linha) || /^\*\s*[Mm][Aa][Tt]\s+\d+/.test(linha)) {
+        const m = linha.match(/(\d+)/);
+        if (m) {
+          matAtual = 'Mat ' + m[1];
+          fightAtual = '';
+          aguardandoNome = false;
+        }
         continue;
       }
 
-      // 2. Captura linha de FIGHT com horario
+      // Captura FIGHT com horario - formato: "+ 12:25 PM: FIGHT 1 (SF)"
       const fm = linha.match(/(\d{1,2}:\d{2}\s*(?:AM|PM)\s*:\s*FIGHT\s+\d+\s*\([^)]+\))/i);
       if (fm) {
         fightAtual = fm[1];
+        aguardandoNome = false;
         continue;
       }
 
-      // 3. Pula linhas irrelevantes
-      const palavrasIgnorar = ['winner', 'defeated', 'vencedor', 'derrotado', 'cookies', 'manage', 'reject', 'accept', 'ibjjf', 'bjjcompsystem', 'english', 'portugues', 'filter', 'home', 'live', 'youtube', 'day ', 'transmissao', 'utilizamos', 'acesse', 'central', 'termos', 'politica', 'adult', 'juvenile', 'master', 'male', 'female', 'black', 'blue', 'purple', 'brown', 'white', 'yellow', 'grey', 'orange', 'green', 'feather', 'light', 'middle', 'medium', 'heavy', 'super', 'ultra', 'rooster', 'open'];
-      const linhaLower = linha.toLowerCase();
-      let isIrrelevante = false;
-      for (const p of palavrasIgnorar) {
-        if (linhaLower.startsWith(p)) { isIrrelevante = true; break; }
+      // Linhas de divisao/categoria (Adult, Male, BLUE, etc) - ignorar
+      if (/^(Adult|Juvenile|Master|Male|Female|Winner|Defeated)/i.test(linha)) continue;
+      if (/^(Cookies|MANAGE|REJECT|ACCEPT|IBJJF|English|Portugues|Filter|Home|Live|Youtube)/i.test(linha)) continue;
+      if (/^(Transmissao|Utilizamos|Acesse|Central|Termos|Politica)/i.test(linha)) continue;
+      if (/youtube|google|cdn|https?:\/\//i.test(linha)) continue;
+      if (/^
+```/.test(linha) || /^\+/.test(linha) || /^\*/.test(linha)) continue;
+
+      // Linha composta apenas por um numero (ex: "5" ou "  5  ")
+      const somenteNumero = linha.match(/^(\d+)$/);
+      if (somenteNumero) {
+        ultimoNumero = somenteNumero[1];
+        aguardandoNome = true;
+        continue;
       }
-      if (isIrrelevante) continue;
-      if (linha.match(/youtube|google|cdn|https?:\/\//i)) continue;
-      if (linha.length < 5) continue;
 
-      // 4. Verifica se a linha comeca com numero (atleta)
-      const numMatch = linha.match(/^(\d+)\s+(.+)$/);
-      if (!numMatch) continue;
-
-      const nomeCompleto = numMatch[2].trim();
-      if (nomeCompleto.length < 5) continue;
-
-      // 5. Verifica se corresponde a algum nome buscado
-      for (const nomeBuscado of names) {
-        if (corresponde(nomeBuscado, nomeCompleto)) {
-          lutas.push({
-            athlete_name: nomeCompleto,
-            mat: matAtual || '-',
-            fight: fightAtual || '-'
-          });
-          break;
+      // Se estamos aguardando um nome de atleta, a proxima linha NAO-numerica
+      // que parece um nome de pessoa é o atleta
+      if (aguardandoNome && linha.length >= 5 && /^[A-Za-z\u00C0-\u024F]/.test(linha)) {
+        const nomeAtleta = linha;
+        
+        // Verifica se corresponde a algum nome buscado
+        for (const nomeBuscado of names) {
+          if (corresponde(nomeBuscado, nomeAtleta)) {
+            lutas.push({
+              athlete_name: nomeAtleta,
+              mat: matAtual || '-',
+              fight: fightAtual || '-'
+            });
+            break;
+          }
         }
+        aguardandoNome = false;
+        continue;
       }
     }
 
@@ -124,9 +140,9 @@ app.post('/buscar-lutas', async (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', servidor: 'BJJ Fight Finder - v18' });
+  res.json({ status: 'ok', servidor: 'BJJ Fight Finder - v19' });
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log('BJJ Fight Finder v18 rodando na porta ' + PORT);
+  console.log('BJJ Fight Finder v19 rodando na porta ' + PORT);
 });
