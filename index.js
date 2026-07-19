@@ -60,7 +60,7 @@ app.post('/buscar-lutas', async (req, res) => {
       for (const nomeBuscado of names) {
         if (!corresponde(nomeBuscado, linha)) continue;
 
-        // EXTRAI A HORA PRIMEIRO, ANTES DE MODIFICAR A LINHA
+        // Extrai hora PRIMEIRO
         let hora = extrairHora(linha);
         if (!hora) {
           for (let j = Math.max(0, i - 10); j < i; j++) {
@@ -69,7 +69,7 @@ app.post('/buscar-lutas', async (req, res) => {
           }
         }
 
-        // DEPOIS extrai o nome do atleta
+        // Depois extrai o nome
         let nomeAtleta = linha.replace(/^\s*\d+\s+/, '').replace(/\s*FIGHT\s+\d+.+$/i, '').trim();
         if (nomeAtleta.length < 4) continue;
 
@@ -102,9 +102,9 @@ app.post('/buscar-lutas', async (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', servidor: 'BJJ Fight Finder - v14' });
+  res.json({ status: 'ok', servidor: 'BJJ Fight Finder - Final' });
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`BJJ Fight Finder v14 rodando na porta ${PORT}`);
+  console.log(`BJJ Fight Finder Final rodando na porta ${PORT}`);
 });
