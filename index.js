@@ -26,14 +26,6 @@ function corresponde(buscado, linha) {
   return acertos >= 1;
 }
 
-function extrairHora(texto) {
-  const h = texto.match(/(\d{1,2}:\d{2})\s*:\s*(?:FIGHT|LUTA)/i);
-  if (h) return h[1];
-  const h2 = texto.match(/(\d{1,2}:\d{2})/);
-  if (h2) return h2[1];
-  return '';
-}
-
 app.post('/buscar-lutas', async (req, res) => {
   const { url, names } = req.body;
   if (!url || !names || names.length === 0) {
@@ -50,31 +42,39 @@ app.post('/buscar-lutas', async (req, res) => {
     const linhas = texto.split('\n').map(l => l.trim()).filter(l => l.length > 3);
 
     let matAtual = '';
+    let fightAtual = '';
     const lutas = [];
 
     for (let i = 0; i < linhas.length; i++) {
       const linha = linhas[i];
+
+      // Captura Mat atual
       const mm = linha.match(/[Mm][Aa][Tt]\s*(\d+)/);
       if (mm && linha.length < 30) matAtual = `Mat ${mm[1]}`;
-      if (linha.match(/^(Winner|Defeated|Vencedor|Derrotado|Cookies|MANAGE|REJECT|ACCEPT|IBJJF|BJJCOMPSYSTEM|English|Portugues|By |Filter|Home|Live|Youtube|Day\s+\d|Transmissao|Utilizamos|Acesse|Central|Termos|Politica)/i)) continue;
-      if (linha.match(/youtube|google|cdn|https?:\/\//i)) continue;
+
+      // Captura a linha COMPLETA do FIGHT (ex: "12:53 PM: FIGHT 4 (SF)")
+      const fm = linha.match(/(\d{1,2}:\d{2}\s*(?:AM|PM)\s*:\s*FIGHT\s+\d+\s*\([^)]+\))/i);
+      if (fm) {
+        fightAtual = fm[1];
+        continue;
+      }
+
+      // Pula linhas irrelevantes
+      if (linha.match(/^(Winner|Defeated|Vencedor|Derrotado|Cookies|MANAGE|REJECT|ACCEPT|IBJJF|BJJCOMPSYSTEM|English|Portugues|By |Filter|Home|Live|Youtube|Day\s+\d|Transmissao|Utilizamos|Acesse|Central|Termos|Politica|\*|\+|
+```)/i)) continue;
       if (linha.length < 6) continue;
 
       for (const nomeBuscado of names) {
         if (!corresponde(nomeBuscado, linha)) continue;
 
-        let hora = extrairHora(linha);
-        if (!hora) {
-          for (let j = Math.max(0, i - 20); j < i; j++) {
-            hora = extrairHora(linhas[j]);
-            if (hora) break;
-          }
-        }
-
-        let nomeAtleta = linha.replace(/^\s*\d+\s+/, '').replace(/\s*FIGHT\s+\d+.+$/i, '').trim();
+        let nomeAtleta = linha.replace(/^\s*\d+\s+/, '').trim();
         if (nomeAtleta.length < 4) continue;
 
-        lutas.push({ athlete_name: nomeAtleta, mat: matAtual || '-', time: hora || '-' });
+        lutas.push({
+          athlete_name: nomeAtleta,
+          mat: matAtual || '-',
+          fight: fightAtual || '-'
+        });
         break;
       }
     }
@@ -82,7 +82,6 @@ app.post('/buscar-lutas', async (req, res) => {
     const vistos = new Set();
     const lutasUnicas = [];
     for (const l of lutas) {
-      const chave = `${l.athlete_name}|${l.mat}|${l.time}`;
       if (!vistos.has(chave)) { vistos.add(chave); lutasUnicas.push(l); }
     }
 
@@ -103,9 +102,9 @@ app.post('/buscar-lutas', async (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', servidor: 'BJJ Fight Finder - v15' });
+  res.json({ status: 'ok', servidor: 'BJJ Fight Finder - v16' });
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`BJJ Fight Finder v15 rodando na porta ${PORT}`);
+  console.log(`BJJ Fight Finder v16 rodando na porta ${PORT}`);
 });
