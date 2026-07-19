@@ -25,7 +25,7 @@ function corresponde(buscado, linha) {
   for (const p of pb) {
     if (l.includes(p)) acertos++;
   }
-  return acertos >= Math.ceil(pb.length * 0.5);
+  return acertos >= 1;
 }
 
 app.post('/buscar-lutas', async (req, res) => {
@@ -33,17 +33,21 @@ app.post('/buscar-lutas', async (req, res) => {
   if (!url || !names || names.length === 0) {
     return res.status(400).json({ error: 'URL e nomes obrigatórios' });
   }
-
   try {
-    // Usa Jina AI Reader para renderizar o JavaScript da página
-    const jinaUrl = `https://r.jina.ai/${url}`;
+    const jinaUrl = `https://r.jina.ai/${encodeURIComponent(url)}`;
+    console.log('Buscando:', jinaUrl.substring(0, 80));
+
     const response = await axios.get(jinaUrl, {
-      headers: { 'Accept': 'text/plain', 'Accept-Language': 'pt-BR,pt;q=0.9' },
-      timeout: 30000
+      headers: {
+        'Accept': 'text/plain',
+        'Accept-Language': 'pt-BR,pt;q=0.9'
+      },
+      timeout: 45000
     });
 
     let texto = typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
     const linhas = texto.split('\n').map(l => l.trim()).filter(l => l.length > 3);
+    console.log(`Total de linhas: ${linhas.length}`);
 
     let matAtual = '';
     const lutas = [];
@@ -51,24 +55,19 @@ app.post('/buscar-lutas', async (req, res) => {
     for (let i = 0; i < linhas.length; i++) {
       const linha = linhas[i];
 
-      // Captura Mat atual
       const mm = linha.match(/[Mm][Aa][Tt]\s*(\d+)/);
-      if (mm && linha.length < 25) matAtual = `Mat ${mm[1]}`;
+      if (mm && linha.length < 30) matAtual = `Mat ${mm[1]}`;
 
-      // Pula linhas irrelevantes
-      if (linha.match(/^(Winner|Defeated|Vencedor|Derrotado|Cookies|MANAGE|REJECT|ACCEPT|IBJJF|BJJCOMPSYSTEM|English|Português|By |Filter|Home|Live|Youtube|Day\s+\d)/i)) continue;
+      if (linha.match(/^(Winner|Defeated|Vencedor|Derrotado|Cookies|MANAGE|REJECT|ACCEPT|IBJJF|BJJCOMPSYSTEM|English|Português|By |Filter|Home|Live|Youtube|Day\s+\d|Transmissão|Utilizamos|Acesse|Central|Termos|Política)/i)) continue;
       if (linha.match(/youtube|google|cdn|https?:\/\//i)) continue;
       if (linha.length < 6) continue;
-      if (linha.match(/^(Transmissão|Utilizamos|Acesse|Central|Termos|Política)/i)) continue;
 
-      // Verifica se contém nome buscado
       for (const nomeBuscado of names) {
         if (!corresponde(nomeBuscado, linha)) continue;
 
-        let nomeAtleta = linha.replace(/^\s*\d+\s+/, '').trim();
+        let nomeAtleta = linha.replace(/^\s*\d+\s+/, '').replace(/\s*FIGHT\s+\d+.+$/i, '').trim();
         if (nomeAtleta.length < 4) continue;
 
-        // Busca hora nas linhas anteriores (até 10 linhas acima)
         let hora = '';
         for (let j = Math.max(0, i - 10); j < i; j++) {
           const h = linhas[j].match(/(\d{1,2}:\d{2})\s*:\s*(?:FIGHT|LUTA)/i);
@@ -85,7 +84,6 @@ app.post('/buscar-lutas', async (req, res) => {
       }
     }
 
-    // Remove duplicatas
     const vistos = new Set();
     const lutasUnicas = [];
     for (const l of lutas) {
@@ -98,6 +96,7 @@ app.post('/buscar-lutas', async (req, res) => {
       !encontrados.some(e => corresponde(e, n))
     );
 
+    console.log(`Encontrados: ${lutasUnicas.length}, Não encontrados: ${naoEncontrados.length}`);
     res.json({
       total_athletes: lutasUnicas.length,
       total_fights: lutasUnicas.length,
@@ -119,5 +118,5 @@ app.get('/health', (req, res) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 BJJ Fight Finder v10 rodando na porta ${PORT}`);
+  console.log(`BJJ Fight Finder v10 rodando na porta ${PORT}`);
 });
