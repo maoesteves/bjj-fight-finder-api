@@ -19,26 +19,13 @@ function corresponde(buscado, encontrado) {
   const e = normalizar(encontrado);
   if (!b || !e) return false;
   if (e.includes(b) || b.includes(e)) return true;
-  const palavrasBuscadas = b.split(' ').filter(w => w.length > 3);
-  const palavrasEncontradas = e.split(' ');
-  if (palavrasBuscadas.length === 0) return false;
+  const pb = b.split(' ').filter(w => w.length > 2);
+  if (pb.length === 0) return false;
   let acertos = 0;
-  for (const pb of palavrasBuscadas) {
-    if (palavrasEncontradas.some(pe => pe.includes(pb) || pb.includes(pe))) acertos++;
+  for (const palavra of pb) {
+    if (e.includes(palavra)) acertos++;
   }
-  return acertos >= Math.min(palavrasBuscadas.length, Math.ceil(palavrasBuscadas.length * 0.6));
-}
-
-function extrairTexto(html) {
-  return html
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '\n')
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '\n')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/(div|p|tr|li|h[1-6]|section|article|pre|code)>/gi, '\n')
-    .replace(/<[^>]*>/g, '')
-    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
-    .replace(/\t/g, ' ')
-    .split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  return acertos >= Math.min(pb.length, Math.ceil(pb.length * 0.5));
 }
 
 app.post('/buscar-lutas', async (req, res) => {
@@ -57,73 +44,69 @@ app.post('/buscar-lutas', async (req, res) => {
       timeout: 30000
     });
 
-    // Extrai linhas de texto puro do HTML
-    const linhas = extrairTexto(response.data);
+    // Extrai texto puro
+    let texto = response.data
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '\n')
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '\n')
+      .replace(/<[^>]+>/g, '\n')
+      .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
+      .replace(/\n\s*\n/g, '\n');
+
+    const linhas = texto.split('\n').map(l => l.trim()).filter(l => l.length > 3);
     
     let matAtual = '';
-    let horaAtual = '';
-    let roundAtual = '';
-    let divisaoAtual = '';
-    const lutas = [];
+    const resultados = [];
 
     for (let i = 0; i < linhas.length; i++) {
       const linha = linhas[i];
 
-      // Identifica MAT/Área: "Mat 1", "* Mat 2", "Área 1"
-      const m = linha.match(/^(?:\*\s*)?(?:[Mm][Aa][Tt]|[Áá]rea)\s*(\d+)/);
+      // Captura mat atual
+      const m = linha.match(/^(?:\*\s*)?(?:[Mm][Aa][Tt]|[Aa]rea)\s*(\d+)/);
       if (m) { matAtual = `Mat ${m[1]}`; continue; }
 
-      // Identifica luta com horário: "+ 15:12: FIGHT 12 (SF)" ou "+ 14:15: LUTA 2 (SF)"
-      const l = linha.match(/^\+?\s*(\d{1,2}:\d{2})\s*:\s*(?:FIGHT|LUTA)\s+(\d+)\s*\(([^)]+)\)/i);
-      if (l) { horaAtual = l[1]; roundAtual = `Luta ${l[2]} (${l[3]})`; continue; }
+      // Verifica se a linha contém algum dos nomes buscados
+      for (const nomeBuscado of names) {
+        if (corresponde(nomeBuscado, linha)) {
+          // Ignora linhas de winner/defeated
+          if (linha.match(/^(Winner|Defeated|Vencedor|Derrotado|W\/|D\/)/i)) continue;
+          if (linha.match(/FIGHT|LUTA/i) && !linha.match(/^\d+\s+/)) continue;
+          
+          // Extrai o nome do atleta da linha
+          const matchNumero = linha.match(/^(\d+)\s+(.+)/);
+          if (matchNumero) {
+            const nomeAtleta = matchNumero[2].trim();
+            
+            // Pega contexto: olha linhas anteriores para mat, hora, round e divisão
+            let hora = '', round = '', divisao = '';
+            for (let j = Math.max(0, i - 10); j < i; j++) {
+              const ant = linhas[j];
+              const h = ant.match(/(\d{1,2}:\d{2})\s*:\s*(?:FIGHT|LUTA)\s+(\d+)\s*\(([^)]+)\)/i);
+              if (h) { hora = h[1]; round = `Luta ${h[2]} (${h[3]})`; }
+              if (ant.includes('/') && ant.match(/(?:Male|Female)/i)) { divisao = ant; }
+            }
 
-      // Identifica divisão: "Pee-Wee 3 / Male / GREY / Middle"
-      const d = linha.match(/^[A-Za-zÀ-ÿ0-9\s-]+\s*\/\s*(?:Male|Female|Masculino|Feminino)\s*\/\s*(?:White|Blue|Purple|Brown|Black|Yellow|Grey|Orange|Green|Branca|Azul|Roxa|Marrom|Preta|Amarela|Cinza|Laranja|Verde)\s*\/\s*\w+/i);
-      if (d) { divisaoAtual = linha; continue; }
-
-      // Remove linhas de winner/defeated
-      if (linha.match(/^(Winner|Defeated|Vencedor|Derrotado)/i)) continue;
-      if (linha.match(/FIGHT|LUTA/i) && !linha.match(/^\d+/)) continue;
-
-      // Identifica linha de atleta: "2 Murilo Hilsdorf de Moura RC Kairós Jiu-Jitsu School"
-      const a = linha.match(/^(\d+)\s+(.+)/);
-      if (a) {
-        const resto = a[2].trim();
-        // Filtra linhas que NÃO são de atleta
-        if (resto.length < 5) continue;
-        if (resto.match(/^(Winner|Defeated|Vencedor|Derrotado|FIGHT|LUTA)/i)) continue;
-
-        // O nome do atleta é o que antecede palavras-chave de equipe
-        const nomeAtleta = resto;
-
-        // Verifica correspondência
-        for (const nomeBuscado of names) {
-          if (corresponde(nomeBuscado, nomeAtleta)) {
-            lutas.push({
+            resultados.push({
               athlete_name: nomeAtleta,
               search_name: nomeBuscado,
-              fight_round: roundAtual || '-',
+              fight_round: round || '-',
               mat: matAtual || '-',
-              day: '19/07/2026',
-              time: horaAtual || '-',
-              division: divisaoAtual || '-',
+              day: '-',
+              time: hora || '-',
+              division: divisao || '-',
               team: '-'
             });
-            break;
           }
+          break;
         }
       }
     }
 
-    // Remove duplicatas (mesmo atleta na mesma luta)
-    const lutasUnicas = [];
+    // Remove duplicatas
     const vistos = new Set();
-    for (const l of lutas) {
+    const lutasUnicas = [];
+    for (const l of resultados) {
       const chave = `${l.athlete_name}|${l.mat}|${l.time}`;
-      if (!vistos.has(chave)) {
-        vistos.add(chave);
-        lutasUnicas.push(l);
-      }
+      if (!vistos.has(chave)) { vistos.add(chave); lutasUnicas.push(l); }
     }
 
     // Atletas não encontrados
@@ -149,9 +132,9 @@ app.post('/buscar-lutas', async (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', servidor: 'BJJ Fight Finder API - v3' });
+  res.json({ status: 'ok', servidor: 'BJJ Fight Finder API - v4' });
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 BJJ Fight Finder API v3 rodando na porta ${PORT}`);
+  console.log(`🚀 BJJ Fight Finder API v4 rodando na porta ${PORT}`);
 });
