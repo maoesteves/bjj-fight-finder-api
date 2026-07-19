@@ -21,9 +21,8 @@ function corresponde(buscado, linha) {
   if (l.includes(b)) return true;
   const pb = b.split(' ').filter(w => w.length > 2);
   if (pb.length === 0) return false;
-  let acertos = 0;
-  for (const p of pb) { if (l.includes(p)) acertos++; }
-  return acertos >= 1;
+  for (const p of pb) { if (l.includes(p)) return true; }
+  return false;
 }
 
 app.post('/buscar-lutas', async (req, res) => {
@@ -41,93 +40,61 @@ app.post('/buscar-lutas', async (req, res) => {
     let texto = typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
     const linhas = texto.split('\n').map(l => l.trim()).filter(l => l.length > 2);
 
-    const cronograma = {};
-    const atletasNoCodigo = {};
-    const atletasNoFight = {};
-
+    // Estrutura para guardar as informacoes
+    const lutas = [];
     let matAtual = '';
     let fightAtual = '';
 
     for (let i = 0; i < linhas.length; i++) {
       const linha = linhas[i];
 
-      const mm = linha.match(/[Mm][Aa][Tt]\s*(\d+)/);
+      // 1. Captura tatame atual
+      const mm = linha.match(/[Mm][Aa][Tt]\s+(\d+)/);
       if (mm && linha.length < 30) {
         matAtual = 'Mat ' + mm[1];
-        if (!cronograma[matAtual]) cronograma[matAtual] = [];
-        if (!atletasNoCodigo[matAtual]) atletasNoCodigo[matAtual] = [];
         fightAtual = '';
         continue;
       }
 
+      // 2. Captura linha de FIGHT com horario
       const fm = linha.match(/(\d{1,2}:\d{2}\s*(?:AM|PM)\s*:\s*FIGHT\s+\d+\s*\([^)]+\))/i);
       if (fm) {
         fightAtual = fm[1];
-        if (matAtual) cronograma[matAtual].push(fightAtual);
         continue;
       }
 
-      if (linha.match(/^(Winner|Defeated|Vencedor|Derrotado|Cookies|MANAGE|REJECT|ACCEPT|IBJJF|BJJCOMPSYSTEM|English|Portugues|By|Filter|Home|Live|Youtube|Day\s+\d|Transmissao|Utilizamos|Acesse|Central|Termos|Politica)/i)) continue;
+      // 3. Pula linhas irrelevantes
+      const palavrasIgnorar = ['winner', 'defeated', 'vencedor', 'derrotado', 'cookies', 'manage', 'reject', 'accept', 'ibjjf', 'bjjcompsystem', 'english', 'portugues', 'filter', 'home', 'live', 'youtube', 'day ', 'transmissao', 'utilizamos', 'acesse', 'central', 'termos', 'politica', 'adult', 'juvenile', 'master', 'male', 'female', 'black', 'blue', 'purple', 'brown', 'white', 'yellow', 'grey', 'orange', 'green', 'feather', 'light', 'middle', 'medium', 'heavy', 'super', 'ultra', 'rooster', 'open'];
+      const linhaLower = linha.toLowerCase();
+      let isIrrelevante = false;
+      for (const p of palavrasIgnorar) {
+        if (linhaLower.startsWith(p)) { isIrrelevante = true; break; }
+      }
+      if (isIrrelevante) continue;
       if (linha.match(/youtube|google|cdn|https?:\/\//i)) continue;
       if (linha.length < 5) continue;
 
-      const atletaMatch = linha.match(/^(\d+)\s+([A-Za-z\u00C0-\u024F][A-Za-z\u00C0-\u024F\s.]+?)(?:\s+(?:[A-Za-z\u00C0-\u024F].+))?$/);
-      if (atletaMatch) {
-        const nomeCompleto = atletaMatch[2].trim();
-        if (nomeCompleto.length < 4) continue;
-        const nomeNorm = normalizar(nomeCompleto);
+      // 4. Verifica se a linha comeca com numero (atleta)
+      const numMatch = linha.match(/^(\d+)\s+(.+)$/);
+      if (!numMatch) continue;
 
-        if (fightAtual) {
-          atletasNoFight[nomeNorm] = {
-            nomeCompleto: nomeCompleto,
+      const nomeCompleto = numMatch[2].trim();
+      if (nomeCompleto.length < 5) continue;
+
+      // 5. Verifica se corresponde a algum nome buscado
+      for (const nomeBuscado of names) {
+        if (corresponde(nomeBuscado, nomeCompleto)) {
+          lutas.push({
+            athlete_name: nomeCompleto,
             mat: matAtual || '-',
-            fight: fightAtual
-          };
-        } else {
-          atletasNoCodigo[matAtual || '-'].push({
-            nomeCompleto: nomeCompleto,
-            nomeNorm: nomeNorm
+            fight: fightAtual || '-'
           });
-        }
-      }
-    }
-
-    const lutas = [];
-    const encontrados = new Set();
-
-    for (const nomeBuscado of names) {
-      let achado = null;
-
-      for (const info of Object.values(atletasNoFight)) {
-        if (corresponde(nomeBuscado, info.nomeCompleto)) {
-          achado = { athlete_name: info.nomeCompleto, mat: info.mat, fight: info.fight };
           break;
         }
       }
-
-      if (!achado) {
-        for (const [matKey, atletas] of Object.entries(atletasNoCodigo)) {
-          for (const atl of atletas) {
-            if (corresponde(nomeBuscado, atl.nomeCompleto)) {
-              const fights = cronograma[matKey] || [];
-              achado = {
-                athlete_name: atl.nomeCompleto,
-                mat: matKey,
-                fight: fights.length > 0 ? fights.join(' | ') : '-'
-              };
-              break;
-            }
-          }
-          if (achado) break;
-        }
-      }
-
-      if (achado) {
-        encontrados.add(nomeBuscado);
-        lutas.push(achado);
-      }
     }
 
+    // Remove duplicatas
     const vistos = new Set();
     const lutasUnicas = [];
     for (const l of lutas) {
@@ -135,7 +102,13 @@ app.post('/buscar-lutas', async (req, res) => {
       if (!vistos.has(chave)) { vistos.add(chave); lutasUnicas.push(l); }
     }
 
-    const naoEncontrados = names.filter(n => !encontrados.has(n));
+    const encontrados = new Set(lutasUnicas.map(l => l.athlete_name));
+    const naoEncontrados = names.filter(n => {
+      for (const e of encontrados) {
+        if (corresponde(n, e)) return false;
+      }
+      return true;
+    });
 
     res.json({
       total_athletes: lutasUnicas.length,
@@ -151,9 +124,9 @@ app.post('/buscar-lutas', async (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', servidor: 'BJJ Fight Finder - v17' });
+  res.json({ status: 'ok', servidor: 'BJJ Fight Finder - v18' });
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log('BJJ Fight Finder v17 rodando na porta ' + PORT);
+  console.log('BJJ Fight Finder v18 rodando na porta ' + PORT);
 });
