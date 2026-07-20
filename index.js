@@ -30,147 +30,142 @@ function corresponde(buscado, linha) {
   return acertos >= 2;
 }
 
-app.post('/buscar-lutas', async function(req, res) {
+function parseLutas(texto, nomes) {
+  var linhas = texto.split('\n').map(function(l) { return l.trim(); }).filter(function(l) { return l.length > 0; });
+  var lutas = [];
+  var matAtual = '';
+  var fightInfoAtual = '';
+  var aguardandoNome = false;
+
+  for (var i = 0; i < linhas.length; i++) {
+    var linha = linhas[i];
+
+    if (/[Mm][Aa][Tt] +[0-9]+/.test(linha) && linha.length < 20) {
+      var m = linha.match(/[0-9]+/);
+      if (m) matAtual = 'Mat ' + m[0];
+      fightInfoAtual = '';
+      aguardandoNome = false;
+      continue;
+    }
+
+    var fi = linha.match(/([0-9]{1,2}:[0-9]{2}\s*(?:AM|PM)?\s*:\s*FIGHT\s+[0-9]+\s*[^)]*\))/i);
+    if (fi) { fightInfoAtual = fi[1].trim(); continue; }
+
+    var up = linha.toUpperCase();
+    if (up.indexOf('WINNER OF') === 0 || up.indexOf('DEFEATED OF') === 0) { if (!fightInfoAtual) fightInfoAtual = linha; continue; }
+    if (up.indexOf('COOKIES') >= 0 || up.indexOf('ACCEPT') >= 0 || up.indexOf('IBJJF') >= 0) continue;
+    if (up.indexOf('TITLE') === 0 || up.indexOf('URL SOURCE') === 0 || up.indexOf('MARKDOWN CONTENT') === 0) continue;
+    if (up.indexOf('YOUTUBE') >= 0) continue;
+    if (/^http/i.test(linha)) continue;
+
+    var linhaClean = linha.replace(/^[*] */, '');
+    if (/^[0-9]{1,2}$/.test(linhaClean)) { aguardandoNome = true; continue; }
+    if (linha.length < 4) continue;
+
+    if (aguardandoNome && /^[A-Za-z\u00C0-\u024F]/.test(linha)) {
+      aguardandoNome = false;
+      for (var n = 0; n < nomes.length; n++) {
+        if (corresponde(nomes[n], linha)) {
+          var jaTem = false;
+          for (var z = 0; z < lutas.length; z++) {
+            if (corresponde(nomes[n], lutas[z].athlete_name)) { jaTem = true; break; }
+          }
+          if (!jaTem) lutas.push({ athlete_name: linha, mat: matAtual || '-', fight_info: fightInfoAtual || '-' });
+          break;
+        }
+      }
+      continue;
+    }
+  }
+
+  for (var nb = 0; nb < nomes.length; nb++) {
+    var jaAchou = false;
+    for (var z = 0; z < lutas.length; z++) {
+      if (corresponde(nomes[nb], lutas[z].athlete_name)) { jaAchou = true; break; }
+    }
+    if (jaAchou) continue;
+    for (var i2 = 0; i2 < linhas.length; i2++) {
+      var l2 = linhas[i2];
+      if (l2.length < 4 || /^[0-9*]/.test(l2)) continue;
+      if (corresponde(nomes[nb], l2)) {
+        lutas.push({ athlete_name: l2.replace(/^[0-9]+ +/, '').replace(/^[*] */, '').trim(), mat: matAtual || '-', fight_info: fightInfoAtual || '-' });
+        break;
+      }
+    }
+  }
+
+  var vistos = {};
+  var unicas = [];
+  for (var i = 0; i < lutas.length; i++) {
+    var chave = lutas[i].athlete_name + '|' + lutas[i].mat;
+    if (!vistos[chave]) { vistos[chave] = true; unicas.push(lutas[i]); }
+  }
+  return unicas;
+}
+
+app.get('/buscar-lutas-v2', async function(req, res) {
+  var url = req.query.url;
+  var names = req.query.names ? req.query.names.split(',') : [];
+  if (!url || names.length === 0) {
+    return res.status(400).json({ error: 'URL e names (separados por virgula) obrigatorios' });
+  }
+  try {
+    var response = await axios.get('https://r.jina.ai/' + url, {
+      headers: { 'Accept': 'text/plain', 'Accept-Language': 'pt-BR,pt;q=0.9' },
+      timeout: 60000
+    });
+    var texto = typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
+    var lutas = parseLutas(texto, names);
+    var encontrados = [];
+    for (var i = 0; i < lutas.length; i++) encontrados.push(lutas[i].athlete_name);
+    var naoEncontrados = [];
+    for (var i = 0; i < names.length; i++) {
+      var achou = false;
+      for (var j = 0; j < encontrados.length; j++) {
+        if (corresponde(names[i], encontrados[j])) { achou = true; break; }
+      }
+      if (!achou) naoEncontrados.push(names[i]);
+    }
+    res.json({ total_athletes: lutas.length, total_fights: lutas.length, not_found: naoEncontrados, fights: lutas });
+  } catch (error) {
+    res.status(500).json({ error: 'Erro de comunicacao com Jina.', detail: error.message });
+  }
+});
+
+app.post('/buscar-lutas-v2', async function(req, res) {
   var url = req.body.url;
   var names = req.body.names;
   if (!url || !names || names.length === 0) {
     return res.status(400).json({ error: 'URL e nomes obrigatorios' });
   }
   try {
-    // TENTATIVA 1: Jina
-    var texto = '';
-    try {
-      var r1 = await axios.get('https://r.jina.ai/' + url, {
-        headers: { 'Accept': 'text/plain', 'Accept-Language': 'pt-BR,pt;q=0.9' },
-        timeout: 30000
-      });
-      texto = typeof r1.data === 'string' ? r1.data : JSON.stringify(r1.data);
-    } catch(e) {
-      console.log('Jina falhou, tentando HTML direto');
-    }
-
-    // TENTATIVA 2: Se Jina nao deu certo ou veio muito pequeno, pega HTML direto
-    if (!texto || texto.length < 500) {
-      var r2 = await axios.get(url, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
-        timeout: 30000
-      });
-      var html = typeof r2.data === 'string' ? r2.data : JSON.stringify(r2.data);
-      // Extrai texto do HTML - tira tags e normaliza
-      texto = html.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
-        .replace(/\s+/g, ' ').replace(/[ \t]+/g, '\n');
-    }
-
-    var linhas = texto.split('\n').map(function(l) { return l.trim(); }).filter(function(l) { return l.length > 0; });
-    var lutas = [];
-    var matAtual = '';
-    var aguardandoNome = false;
-
-    for (var i = 0; i < linhas.length; i++) {
-      var linha = linhas[i];
-
-      if (/[Mm][Aa][Tt] +[0-9]+/.test(linha) && linha.length < 20) {
-        var m = linha.match(/[0-9]+/);
-        if (m) matAtual = 'Mat ' + m[0];
-        aguardandoNome = false;
-        continue;
-      }
-
-      var up = linha.toUpperCase();
-      if (up.indexOf('WINNER OF') === 0 || up.indexOf('DEFEATED OF') === 0) continue;
-      if (up.indexOf('COOKIES') >= 0 || up.indexOf('ACCEPT') >= 0 || up.indexOf('IBJJF') >= 0) continue;
-      if (up.indexOf('YOUTUBE') >= 0 || /^http/i.test(linha)) continue;
-
-      var linhaClean = linha.replace(/^[*] */, '');
-      if (/^[0-9]{1,2}$/.test(linhaClean)) { aguardandoNome = true; continue; }
-      if (linha.length < 4) continue;
-
-      if (aguardandoNome && /^[A-Za-z\u00C0-\u024F]/.test(linha)) {
-        aguardandoNome = false;
-        for (var n = 0; n < names.length; n++) {
-          if (corresponde(names[n], linha)) {
-            var jaTem = false;
-            for (var z = 0; z < lutas.length; z++) {
-              if (corresponde(names[n], lutas[z].athlete_name)) { jaTem = true; break; }
-            }
-            if (!jaTem) lutas.push({ athlete_name: linha, mat: matAtual || '-' });
-            break;
-          }
-        }
-        continue;
-      }
-    }
-
-    // FALLBACK: procura cada nome em TODAS as linhas
-    for (var nb = 0; nb < names.length; nb++) {
-      var jaAchou = false;
-      for (var z = 0; z < lutas.length; z++) {
-        if (corresponde(names[nb], lutas[z].athlete_name)) { jaAchou = true; break; }
-      }
-      if (jaAchou) continue;
-      for (var i2 = 0; i2 < linhas.length; i2++) {
-        var l2 = linhas[i2];
-        if (l2.length < 4 || /^[0-9*]/.test(l2)) continue;
-        if (corresponde(names[nb], l2)) {
-          lutas.push({ athlete_name: l2.replace(/^[0-9]+ +/, '').trim(), mat: matAtual || '-' });
-          break;
-        }
-      }
-    }
-
-    var vistos = {};
-    var lutasUnicas = [];
-    for (var l = 0; l < lutas.length; l++) {
-      var luta = lutas[l];
-      var chave = luta.athlete_name + '|' + luta.mat;
-      if (!vistos[chave]) { vistos[chave] = true; lutasUnicas.push(luta); }
-    }
-
+    var response = await axios.get('https://r.jina.ai/' + url, {
+      headers: { 'Accept': 'text/plain', 'Accept-Language': 'pt-BR,pt;q=0.9' },
+      timeout: 60000
+    });
+    var texto = typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
+    var lutas = parseLutas(texto, names);
     var encontrados = [];
-    for (var le = 0; le < lutasUnicas.length; le++) encontrados.push(lutasUnicas[le].athlete_name);
+    for (var i = 0; i < lutas.length; i++) encontrados.push(lutas[i].athlete_name);
     var naoEncontrados = [];
-    for (var ne = 0; ne < names.length; ne++) {
+    for (var i = 0; i < names.length; i++) {
       var achou = false;
-      for (var en = 0; en < encontrados.length; en++) {
-        if (corresponde(names[ne], encontrados[en])) { achou = true; break; }
+      for (var j = 0; j < encontrados.length; j++) {
+        if (corresponde(names[i], encontrados[j])) { achou = true; break; }
       }
-      if (!achou) naoEncontrados.push(names[ne]);
+      if (!achou) naoEncontrados.push(names[i]);
     }
-
-    res.json({ total_athletes: lutasUnicas.length, total_fights: lutasUnicas.length, not_found: naoEncontrados, fights: lutasUnicas, debug: { linhas_total: linhas.length, linhas_amostra: linhas.slice(0, 30) } });
+    res.json({ total_athletes: lutas.length, total_fights: lutas.length, not_found: naoEncontrados, fights: lutas });
   } catch (error) {
     console.error('Erro:', error.message);
-    res.status(500).json({ error: 'Erro de comunicacao com o servidor.', detail: error.message });
+    res.status(500).json({ error: 'Erro de comunicacao com Jina.', detail: error.message });
   }
 });
 
-app.get('/debug', async function(req, res) {
-  var url = req.query.url || 'https://www.bjjcompsystem.com/tournaments/3262/tournament_days/4913';
-  var results = {};
-  try {
-    var r1 = await axios.get('https://r.jina.ai/' + url, {
-      headers: { 'Accept': 'text/plain', 'Accept-Language': 'pt-BR,pt;q=0.9' },
-      timeout: 30000
-    });
-    results.jina = (typeof r1.data === 'string' ? r1.data : JSON.stringify(r1.data)).substring(0, 3000);
-  } catch(e) { results.jina = 'ERRO: ' + e.message; }
-  try {
-    var r2 = await axios.get(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-      timeout: 30000
-    });
-    var html = typeof r2.data === 'string' ? r2.data : JSON.stringify(r2.data);
-    results.html_tamanho = html.length;
-    results.html_inicio = html.substring(0, 2000);
-    results.html_fim = html.substring(html.length - 500);
-  } catch(e) { results.html = 'ERRO: ' + e.message; }
-  res.json(results);
-});
-
 app.get('/health', function(req, res) {
-  res.json({ status: 'ok', servidor: 'BJJ Fight Finder - v30' });
+  res.json({ status: 'ok', servidor: 'BJJ Fight Finder - v31' });
 });
 
 app.listen(PORT, '0.0.0.0', function() {
-  console.log('BJJ Fight Finder v30 rodando na porta ' + PORT);
+  console.log('BJJ Fight Finder v31 rodando na porta ' + PORT);
 });
